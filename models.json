@@ -1,0 +1,10 @@
+{
+  "models": [
+    "vampire_ver_1.2.onnx",
+    "vampire_ver_1.3.onnx",
+    "vampire_ver_2.0.onnx",
+    "vampire_ver_2.1.onnx",
+    "vampire_ver_2.2.onnx",
+    "vampire_ver_2.3.onnx"
+  ]
+}
