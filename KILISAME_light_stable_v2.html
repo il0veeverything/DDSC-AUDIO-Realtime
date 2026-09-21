@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>KILISAME</title>
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+<style>
+:root{
+  --bg:#0b0d10;
+  --surface:#111419;
+  --surface2:#181c21;
+  --line:#2a2f36;
+  --text:#f2f3f5;
+  --muted:#9299a3;
+  --accent:#d9dde3;
+  --danger:#c94b4b;
+}
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+  font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+button{font:inherit;color:inherit;cursor:pointer}
+.app{height:100dvh;display:flex;flex-direction:column}
+header{
+  height:64px;flex:none;border-bottom:1px solid var(--line);
+  display:flex;align-items:center;padding:0 18px;gap:12px;background:var(--bg)
+}
+.brand{font-size:20px;font-weight:800;letter-spacing:-.5px}
+.header-spacer{flex:1}
+.history-btn{
+  height:38px;padding:0 14px;border:1px solid var(--line);background:var(--surface);
+  border-radius:9px;font-size:13px;font-weight:700
+}
+main{flex:1;min-height:0;display:flex;flex-direction:column}
+.graph-area{
+  flex:1 1 50%;min-height:0;position:relative;border-bottom:1px solid var(--line);
+  padding:14px 16px 10px;display:flex;flex-direction:column
+}
+.graph-head{height:28px;display:flex;align-items:center;justify-content:space-between;flex:none}
+.graph-title{font-size:12px;font-weight:700;color:var(--muted)}
+.graph-now{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+#paceCanvas{width:100%;height:100%;display:block;min-height:0}
+.graph-status{
+  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  color:var(--muted);font-size:13px;text-align:center;pointer-events:none
+}
+.control-area{
+  flex:1 1 50%;min-height:0;padding:14px 16px 18px;
+  display:flex;align-items:stretch
+}
+.record-btn{
+  width:100%;height:100%;min-height:180px;border:1px solid var(--line);
+  border-radius:16px;background:var(--surface);display:flex;
+  flex-direction:column;align-items:center;justify-content:center;gap:10px
+}
+.record-btn:active{background:var(--surface2)}
+.record-btn.recording{background:#151719;border-color:#4b3030}
+.count{
+  font-size:clamp(84px,18vw,180px);line-height:.82;font-weight:850;
+  letter-spacing:-7px;font-variant-numeric:tabular-nums
+}
+.count-label{font-size:12px;color:var(--muted);letter-spacing:.04em}
+.action-label{font-size:clamp(18px,4vw,30px);font-weight:750;margin-top:6px}
+.elapsed{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.modal{
+  position:fixed;inset:0;background:rgba(0,0,0,.72);display:none;z-index:10;
+  align-items:flex-end;justify-content:center
+}
+.modal.open{display:flex}
+.sheet{
+  width:min(680px,100%);max-height:82dvh;background:var(--surface);
+  border-top:1px solid var(--line);padding:18px 16px 24px;overflow:auto
+}
+.sheet-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.sheet h2{margin:0;font-size:18px}
+.close-btn{border:1px solid var(--line);background:transparent;border-radius:8px;width:36px;height:36px}
+.history-empty{padding:40px 10px;text-align:center;color:var(--muted);font-size:13px}
+.history-list{display:flex;flex-direction:column;gap:8px}
+.history-item{
+  border:1px solid var(--line);background:var(--surface2);border-radius:10px;
+  padding:13px;display:grid;grid-template-columns:1fr auto;gap:8px
+}
+.history-main{min-width:0}
+.history-count{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums}
+.history-meta{margin-top:5px;color:var(--muted);font-size:12px;line-height:1.6}
+.delete-btn{align-self:center;border:1px solid var(--line);background:transparent;border-radius:7px;
+  padding:7px 9px;font-size:11px;color:var(--muted)}
+.notice{
+  position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:20;
+  padding:9px 13px;background:#e8eaed;color:#111;border-radius:8px;font-size:12px;
+  display:none;white-space:nowrap
+}
+.notice.show{display:block}
+@media(max-width:600px){
+  header{height:58px;padding:0 12px}
+  .graph-area{padding:10px 10px 7px}
+  .control-area{padding:10px 10px 12px}
+  .record-btn{min-height:160px;border-radius:13px}
+}
+
+.record-frame{position:relative;width:100%;height:100%;min-height:180px;border:4px solid #fff;border-radius:16px;background:#000;color:#fff;display:flex;align-items:center;justify-content:center}
+.record-frame.recording{background:#000;color:#fff;border-color:#f00}
+.record-label{position:absolute;top:14px;left:18px;font-size:13px;font-weight:700;color:#555;z-index:2}
+.record-frame.recording .record-label,.record-frame.recording .action-label{color:#ff4d4d}
+.record-frame .record-btn{border:0;background:transparent;width:100%;height:100%;min-height:0}
+.record-btn.recording{background:transparent}
+.count-row{height:clamp(90px,18vw,180px);display:flex;align-items:baseline;justify-content:center;line-height:.82;font-variant-numeric:tabular-nums}
+.count-int{font-size:clamp(84px,18vw,180px);font-weight:850;letter-spacing:-7px}
+.count-half{display:inline-block;width:.52em;overflow:hidden;font-size:clamp(42px,9vw,90px);font-weight:800;letter-spacing:-3px;opacity:0;transform:translateY(-.03em)}
+.count-half.visible{opacity:1}
+.pace-readout{position:absolute;right:20px;bottom:18px;display:flex;align-items:baseline;gap:6px;font-variant-numeric:tabular-nums}
+.pace-readout span{font-size:clamp(28px,4vw,46px);font-weight:850;line-height:1}
+.pace-readout small{font-size:12px;color:var(--muted)}
+.record-frame.recording .pace-readout small{color:#aaa}
+@media(max-width:600px){.record-frame{border-radius:13px}.pace-readout{right:16px;bottom:16px}}
+</style>
+</head>
+<body>
+<div class="app">
+<header>
+  <div class="brand">KILISAME</div>
+  <div class="header-spacer"></div>
+  <button class="history-btn" id="historyBtn">履歴</button>
+</header>
+
+<main>
+  <section class="graph-area">
+    <div class="graph-head">
+      <span class="graph-title">ペース（回 / 15秒）</span>
+      <span class="graph-now" id="graphNow">0.0s</span>
+    </div>
+    <canvas id="paceCanvas"></canvas>
+    <div class="graph-status" id="graphStatus">モデルを読み込み中…</div>
+  </section>
+
+  <section class="control-area">
+    <div class="record-frame" id="recordFrame">
+    <div class="record-label">記録</div>
+    <button class="record-btn" id="recordBtn" disabled>
+      <div class="count-row"><span class="count-int" id="countInt">0</span><span class="count-half" id="countHalf">.5</span></div>
+      <div class="count-label">カウント</div>
+      <div class="action-label" id="actionLabel">読み込み中…</div>
+      <div class="elapsed" id="elapsed">00:00.0</div>
+    </button>
+    <div class="pace-readout"><span id="paceValue">—</span><small>回 / 15秒</small></div>
+  </div>
+  </section>
+</main>
+</div>
+
+<div class="modal" id="historyModal">
+  <div class="sheet">
+    <div class="sheet-head">
+      <h2>履歴</h2>
+      <button class="close-btn" id="closeHistory">×</button>
+    </div>
+    <div id="historyList" class="history-list"></div>
+  </div>
+</div>
+<div class="notice" id="notice"></div>
+
+<script>
+(() => {
+'use strict';
+
+/* ===== Model / realtime inference ===== */
+const RT = {
+  FFT_SIZE:1024,HOP_SIZE:480,MODEL_RATE:48000,BIN_COUNT:214,WINDOW_SIZE:8,FEATURE_DIM:3024,
+  HIGH:.65,LOW:.35,START_FRAMES:2,END_FRAMES:2,MIN_GAP_MS:60,
+  audioContext:null,source:null,worklet:null,stream:null,running:false,
+  sampleQueue:new Float32Array(0),frameIndex:0,spectra:[],deltas:[],releases:[],
+  currentRelease:0,state:'WAITING',highCount:0,lowCount:0,lastEventTime:-Infinity,
+  eventCount:0,processing:false,fftRe:new Float64Array(1024),fftIm:new Float64Array(1024),
+  window:new Float32Array(1024),binIndices:new Uint16Array(214),lastProbability:0,
+  detectedHitFrames:[],probabilities:[],stepTimes:[]
+};
+let session=null,inputName='',outputNames=[];
+let actualRate=48000;
+let resampleCarry=null;
+
+const recordBtn=document.getElementById('recordBtn');
+const countInt=document.getElementById('countInt');
+const countHalf=document.getElementById('countHalf');
+const paceValue=document.getElementById('paceValue');
+const recordFrame=document.getElementById('recordFrame');
+const actionLabel=document.getElementById('actionLabel');
+const elapsedEl=document.getElementById('elapsed');
+const graphStatus=document.getElementById('graphStatus');
+const graphNow=document.getElementById('graphNow');
+const canvas=document.getElementById('paceCanvas');
+const ctx=canvas.getContext('2d');
+const historyModal=document.getElementById('historyModal');
+const historyList=document.getElementById('historyList');
+const notice=document.getElementById('notice');
+
+for(let i=0;i<RT.FFT_SIZE;i++) RT.window[i]=.54-.46*Math.cos(2*Math.PI*i/(RT.FFT_SIZE-1));
+for(let i=0;i<RT.BIN_COUNT;i++) RT.binIndices[i]=i;
+
+function resizeCanvas(){
+  const r=canvas.getBoundingClientRect(),d=window.devicePixelRatio||1;
+  canvas.width=Math.max(1,Math.floor(r.width*d));
+  canvas.height=Math.max(1,Math.floor(r.height*d));
+  ctx.setTransform(d,0,0,d,0,0);
+  drawGraph();
+}
+window.addEventListener('resize',resizeCanvas);
+
+function showNotice(t){
+  notice.textContent=t;notice.classList.add('show');
+  clearTimeout(showNotice.timer);showNotice.timer=setTimeout(()=>notice.classList.remove('show'),2400);
+}
+
+function appendSamples(input){
+  const old=RT.sampleQueue,out=new Float32Array(old.length+input.length);
+  out.set(old);out.set(input,old.length);RT.sampleQueue=out;
+}
+function resampleTo48k(input,sourceRate){
+  if(sourceRate===RT.MODEL_RATE)return input;
+  const ratio=sourceRate/RT.MODEL_RATE;
+  const combined=resampleCarry?new Float32Array(resampleCarry.length+input.length):input;
+  if(resampleCarry){combined.set(resampleCarry);combined.set(input,resampleCarry.length)}
+  const maxOut=Math.floor((combined.length-1)/ratio);
+  if(maxOut<=0){resampleCarry=combined.slice();return new Float32Array(0)}
+  const out=new Float32Array(maxOut);
+  for(let j=0;j<maxOut;j++){
+    const pos=j*ratio,i=Math.floor(pos),f=pos-i;
+    out[j]=combined[i]*(1-f)+combined[i+1]*f;
+  }
+  const consumed=Math.floor(maxOut*ratio);
+  resampleCarry=combined.slice(Math.max(0,consumed));
+  return out;
+}
+function fftSpectrum(pcm){
+  const N=RT.FFT_SIZE,re=RT.fftRe,im=RT.fftIm;
+  for(let i=0;i<N;i++){re[i]=pcm[i]*RT.window[i];im[i]=0}
+  for(let i=1,j=0;i<N;i++){
+    let bit=N>>1;for(;j&bit;bit>>=1)j^=bit;j^=bit;
+    if(i<j){let t=re[i];re[i]=re[j];re[j]=t;t=im[i];im[i]=im[j];im[j]=t}
+  }
+  for(let len=2;len<=N;len<<=1){
+    const half=len>>1,ang=-2*Math.PI/len,wlr=Math.cos(ang),wli=Math.sin(ang);
+    for(let i=0;i<N;i+=len){
+      let wr=1,wi=0;
+      for(let j=0;j<half;j++){
+        const ur=re[i+j],ui=im[i+j],vr=re[i+j+half]*wr-im[i+j+half]*wi,
+          vi=re[i+j+half]*wi+im[i+j+half]*wr;
+        re[i+j]=ur+vr;im[i+j]=ui+vi;re[i+j+half]=ur-vr;im[i+j+half]=ui-vi;
+        const nwr=wr*wlr-wi*wli;wi=wr*wli+wi*wlr;wr=nwr;
+      }
+    }
+  }
+  const bins=new Float32Array(RT.BIN_COUNT);
+  for(let b=0;b<RT.BIN_COUNT;b++){
+    const k=RT.binIndices[b],mag=Math.sqrt(re[k]*re[k]+im[k]*im[k])/(N/2);
+    bins[b]=mag>.00001?20*Math.log10(mag):-100;
+  }
+  return bins;
+}
+function makeFeatureVector(endFrame){
+  if(RT.spectra.length<RT.WINDOW_SIZE)return null;
+  const start=endFrame-RT.WINDOW_SIZE+1,numCols=RT.BIN_COUNT+2;
+  const raw=new Float32Array(RT.WINDOW_SIZE*numCols);
+  for(let r=0;r<RT.WINDOW_SIZE;r++){
+    const row=RT.spectra[start+r],base=r*numCols;
+    raw.set(row,base);raw[base+RT.BIN_COUNT]=RT.deltas[start+r];raw[base+RT.BIN_COUNT+1]=RT.releases[start+r];
+  }
+  const mean=new Float32Array(numCols),std=new Float32Array(numCols),min=new Float32Array(numCols),
+    max=new Float32Array(numCols),mad=new Float32Array(numCols),maxad=new Float32Array(numCols);
+  for(let c=0;c<numCols;c++){
+    let sum=0,mn=Infinity,mx=-Infinity;
+    for(let r=0;r<RT.WINDOW_SIZE;r++){const v=raw[r*numCols+c];sum+=v;if(v<mn)mn=v;if(v>mx)mx=v}
+    const av=sum/RT.WINDOW_SIZE;mean[c]=av;min[c]=mn;max[c]=mx;
+    let vs=0,ds=0,md=0;
+    for(let r=0;r<RT.WINDOW_SIZE;r++){
+      const v=raw[r*numCols+c],d=v-av;vs+=d*d;
+      if(r>0){const ad=Math.abs(v-raw[(r-1)*numCols+c]);ds+=ad;if(ad>md)md=ad}
+    }
+    std[c]=Math.sqrt(vs/RT.WINDOW_SIZE);mad[c]=ds/(RT.WINDOW_SIZE-1);maxad[c]=md;
+  }
+  const feat=new Float32Array(RT.FEATURE_DIM);let o=0;
+  feat.set(raw,o);o+=raw.length;feat.set(mean,o);o+=numCols;feat.set(std,o);o+=numCols;
+  feat.set(min,o);o+=numCols;feat.set(max,o);o+=numCols;feat.set(mad,o);o+=numCols;feat.set(maxad,o);
+  return feat;
+}
+function positiveProbability(results){
+  const names=outputNames||[];
+  const n=names.find(x=>x==='probabilities')||names.find(x=>/prob/i.test(x));
+  if(!n||!results[n])throw new Error('ONNX確率出力が見つからない');
+  const v=results[n],d=v.data,ds=v.dims||[];
+  if(ds.length>=2&&ds[ds.length-1]>=2)return Number(d[1])||0;
+  if(d.length===1)return Number(d[0])||0;
+  if(d.length>=2)return Number(d[1])||0;
+  throw new Error('ONNX確率出力を解析できない');
+}
+async function inferOne(feat){
+  const tensor=new ort.Tensor('float32',new Float32Array(feat),[1,RT.FEATURE_DIM]);
+  const results=await session.run({[inputName]:tensor});
+  return positiveProbability(results);
+}
+function updateEventState(p){
+  const now=RT.frameIndex*10,minGap=RT.MIN_GAP_MS;
+  if(RT.state==='WAITING'){
+    if(p>=RT.HIGH){
+      RT.highCount++;
+      if(RT.highCount>=RT.START_FRAMES&&now-RT.lastEventTime>=minGap){
+        RT.state='ACTIVE';RT.eventCount++;RT.lastEventTime=now;RT.highCount=0;RT.lowCount=0;
+        RT.detectedHitFrames.push(RT.frameIndex);
+        RT.stepTimes.push(RT.frameIndex*.01);
+        countInt.textContent=String(Math.floor(RT.stepTimes.length/2));
+        countHalf.classList.toggle('visible', RT.stepTimes.length%2===1);
+        updatePaceReadout();
+        drawGraph();
+      }
+    }else RT.highCount=0;
+  }else if(RT.state==='CANDIDATE'){
+    if(p>=RT.HIGH){RT.highCount++;if(RT.highCount>=RT.START_FRAMES&&now-RT.lastEventTime>=minGap){
+      RT.state='ACTIVE';RT.eventCount++;RT.lastEventTime=now;RT.highCount=0;RT.lowCount=0;
+      RT.detectedHitFrames.push(RT.frameIndex);RT.stepTimes.push(RT.frameIndex*.01);
+      countInt.textContent=String(Math.floor(RT.stepTimes.length/2));
+        countHalf.classList.toggle('visible', RT.stepTimes.length%2===1);
+        updatePaceReadout();drawGraph();
+    }}else{RT.highCount=0;RT.state='WAITING'}
+  }else if(RT.state==='ACTIVE'){
+    if(p<=RT.LOW){RT.lowCount++;if(RT.lowCount>=RT.END_FRAMES){RT.state='WAITING';RT.lowCount=0}}
+    else RT.lowCount=0;
+  }
+}
+async function processFrames(){
+  if(!RT.running||RT.processing)return;
+  RT.processing=true;
+  try{
+    while(RT.sampleQueue.length>=RT.FFT_SIZE){
+      const frame=RT.sampleQueue.slice(0,RT.FFT_SIZE);RT.sampleQueue=RT.sampleQueue.slice(RT.HOP_SIZE);
+      const bins=fftSpectrum(frame),highStart=Math.max(0,Math.ceil(1500/(RT.MODEL_RATE/RT.FFT_SIZE)));
+      let sum=0;for(let k=highStart;k<RT.BIN_COUNT;k++)sum+=bins[k];
+      const power=sum/Math.max(1,RT.BIN_COUNT-highStart);
+      let minBase=power,lookback=Math.max(0,RT.deltas.length-3);
+      for(let j=lookback;j<RT.deltas.length;j++){const prior=RT.spectra[j]._power;if(prior<minBase)minBase=prior}
+      const delta=Math.max(0,power-minBase);RT.deltas.push(delta);
+      if(delta>RT.currentRelease)RT.currentRelease=delta;else RT.currentRelease=Math.max(0,RT.currentRelease*.85);
+      RT.releases.push(RT.currentRelease);
+      Object.defineProperty(bins,'_power',{value:power,enumerable:false});RT.spectra.push(bins);
+      if(RT.spectra.length>=RT.WINDOW_SIZE){
+        const feat=makeFeatureVector(RT.spectra.length-1);
+        if(!feat||feat.length!==RT.FEATURE_DIM)throw new Error('特徴量次元数不一致');
+        const p=Math.max(0,Math.min(1,await inferOne(feat)));
+        RT.lastProbability=p;RT.probabilities[RT.spectra.length-1]=p;updateEventState(p);
+      }
+      RT.frameIndex++;
+    }
+  }catch(e){
+    console.error(e);showNotice('解析エラー: '+e.message);await stopRealtime(false);
+  }finally{
+    RT.processing=false;
+    if(RT.running&&RT.sampleQueue.length>=RT.FFT_SIZE) queueMicrotask(()=>processFrames());
+  }
+}
+async function startRealtime(){
+  if(RT.running)return;
+  if(!session){showNotice('モデルを読み込み中である');return}
+  if(!navigator.mediaDevices?.getUserMedia){showNotice('HTTPSまたはlocalhostで開いてください');return}
+  try{
+    RT.stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
+    RT.audioContext=new AudioContext({sampleRate:RT.MODEL_RATE,latencyHint:'interactive'});
+    await RT.audioContext.resume();actualRate=RT.audioContext.sampleRate;
+    RT.source=RT.audioContext.createMediaStreamSource(RT.stream);
+    const code=`class DDSCAudioCapture extends AudioWorkletProcessor{
+      process(inputs){const ch=inputs[0]&&inputs[0][0];if(ch){const c=new Float32Array(ch.length);c.set(ch);this.port.postMessage(c,[c.buffer])}return true}
+    }registerProcessor('ddsc-audio-capture',DDSCAudioCapture);`;
+    const url=URL.createObjectURL(new Blob([code],{type:'application/javascript'}));
+    await RT.audioContext.audioWorklet.addModule(url);URL.revokeObjectURL(url);
+    RT.worklet=new AudioWorkletNode(RT.audioContext,'ddsc-audio-capture');
+    RT.worklet.port.onmessage=e=>{if(!RT.running)return;const d=resampleTo48k(e.data,actualRate);if(d.length)appendSamples(d);processFrames()};
+    resampleCarry=null;RT.sampleQueue=new Float32Array(0);RT.spectra=[];RT.deltas=[];RT.releases=[];
+    RT.currentRelease=0;RT.frameIndex=0;RT.eventCount=0;RT.probabilities=[];RT.detectedHitFrames=[];RT.stepTimes=[];
+    RT.highCount=0;RT.lowCount=0;RT.lastEventTime=-Infinity;RT.state='WAITING';
+    RT.running=true;
+    RT.source.connect(RT.worklet);
+    const silent=RT.audioContext.createGain();silent.gain.value=0;RT.worklet.connect(silent);silent.connect(RT.audioContext.destination);
+    sessionStart=performance.now();
+    recordBtn.classList.add('recording');recordFrame.classList.add('recording');actionLabel.textContent='記録停止';graphStatus.textContent='';
+    countInt.textContent='0';drawGraph();showNotice('計測を開始した');
+  }catch(e){
+    console.error(e);showNotice('開始できない: '+e.message);
+    if(RT.stream)RT.stream.getTracks().forEach(t=>t.stop());RT.stream=null;
+    if(RT.audioContext){await RT.audioContext.close().catch(()=>{});RT.audioContext=null}
+  }
+}
+async function stopRealtime(save=true){
+  const wasRunning=RT.running;RT.running=false;
+  if(RT.worklet){try{RT.worklet.disconnect()}catch{}RT.worklet=null}
+  if(RT.source){try{RT.source.disconnect()}catch{}RT.source=null}
+  if(RT.stream){RT.stream.getTracks().forEach(t=>t.stop());RT.stream=null}
+  if(RT.audioContext){try{await RT.audioContext.close()}catch{}RT.audioContext=null}
+  RT.sampleQueue=new Float32Array(0);
+  recordBtn.classList.remove('recording');actionLabel.textContent='記録開始';
+  if(wasRunning&&save){
+    const duration=Math.max(0,(performance.now()-sessionStart)/1000);
+    saveHistory({count:RT.eventCount,duration,date:Date.now()});
+    showNotice('記録を履歴に保存した');
+  }
+  if(wasRunning&&!save)showNotice('計測を停止した');
+  drawGraph();
+}
+function resetRealtime(){
+  RT.running=false;RT.sampleQueue=new Float32Array(0);
+  if(RT.worklet){try{RT.worklet.disconnect()}catch{}RT.worklet=null}
+  if(RT.source){try{RT.source.disconnect()}catch{}RT.source=null}
+  if(RT.stream){RT.stream.getTracks().forEach(t=>t.stop());RT.stream=null}
+  if(RT.audioContext){try{RT.audioContext.close()}catch{}RT.audioContext=null}
+  RT.frameIndex=0;RT.spectra=[];RT.deltas=[];RT.releases=[];RT.eventCount=0;RT.stepTimes=[];RT.detectedHitFrames=[];
+  countInt.textContent='0';countHalf.classList.remove('visible');paceValue.textContent='—';
+  actionLabel.textContent='記録開始';recordBtn.classList.remove('recording');recordFrame.classList.remove('recording');
+  graphStatus.textContent='記録開始を押すと計測が始まる';drawGraph();
+}
+
+function updatePaceReadout(){
+  if(RT.stepTimes.length<2){paceValue.textContent='—';return;}
+  const a=RT.stepTimes[RT.stepTimes.length-1], b=RT.stepTimes[RT.stepTimes.length-2];
+  const d=a-b; paceValue.textContent=d>0?String(Math.round(15/d)):'—';
+}
+/* ===== 10-second live pace graph ===== */
+let sessionStart=0;
+function pacePoints(){
+  const a=RT.stepTimes;if(a.length<2)return [];
+  const out=[];
+  for(let i=1;i<a.length;i++){
+    const interval=a[i]-a[i-1];
+    if(interval>0)out.push({t:a[i],pace:15/interval});
+  }
+  return out;
+}
+function drawGraph(){
+  const w=canvas.clientWidth,h=canvas.clientHeight;if(!w||!h)return;
+  ctx.clearRect(0,0,w,h);
+  ctx.strokeStyle='#262b31';ctx.lineWidth=1;
+  const pad={l:38,r:8,t:8,b:23},gw=w-pad.l-pad.r,gh=h-pad.t-pad.b;
+  const now=RT.running?Math.max(10,(performance.now()-sessionStart)/1000):Math.max(10,RT.stepTimes.at(-1)||10);
+  const left=now-10;
+  ctx.font='10px system-ui';ctx.fillStyle='#777e87';ctx.textAlign='center';ctx.textBaseline='top';
+  for(let i=0;i<=10;i++){
+    const x=pad.l+gw*i/10;
+    ctx.beginPath();ctx.moveTo(x,pad.t);ctx.lineTo(x,pad.t+gh);ctx.stroke();
+    ctx.fillText((left+i).toFixed(0)+'s',x,h-17);
+  }
+  const pts=pacePoints().filter(p=>p.t>=left&&p.t<=now);
+  let maxP=15;
+  for(const p of pts)maxP=Math.max(maxP,p.pace);
+  maxP=Math.ceil(maxP/5)*5;
+  ctx.textAlign='right';ctx.textBaseline='middle';
+  for(let y=0;y<=4;y++){
+    const val=maxP*(1-y/4),yy=pad.t+gh*y/4;
+    ctx.fillText(val.toFixed(0),pad.l-6,yy);
+    if(y>0){ctx.strokeStyle='#1d2228';ctx.beginPath();ctx.moveTo(pad.l,yy);ctx.lineTo(pad.l+gw,yy);ctx.stroke()}
+  }
+  if(pts.length){
+    ctx.strokeStyle='#d6d9de';ctx.lineWidth=2;ctx.beginPath();
+    pts.forEach((p,i)=>{
+      const x=pad.l+((p.t-left)/10)*gw,y=pad.t+gh-(p.pace/maxP)*gh;
+      if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+    });ctx.stroke();
+  }
+  graphNow.textContent=(RT.running?(performance.now()-sessionStart)/1000:(RT.stepTimes.at(-1)||0)).toFixed(1)+'s';
+}
+setInterval(()=>{if(RT.running){elapsedEl.textContent=formatElapsed((performance.now()-sessionStart)/1000);drawGraph()}},100);
+
+function formatElapsed(s){return String(Math.floor(s/60)).padStart(2,'0')+':'+(s%60).toFixed(1).padStart(4,'0')}
+
+/* ===== Model loading ===== */
+async function loadModel(){
+  try{
+    if(!window.ort)throw new Error('ONNX Runtime Webを読み込めない');
+    const r=await fetch('./Models/models.json?v='+Date.now(),{cache:'no-store'});
+    if(!r.ok)throw new Error('models.json HTTP '+r.status);
+    const manifest=await r.json();
+    const files=Array.isArray(manifest)?manifest:(Array.isArray(manifest.models)?manifest.models:[]);
+    const models=files.filter(x=>typeof x==='string'&&/\.onnx$/i.test(x)).map(x=>x.split('/').pop())
+      .filter((x,i,a)=>a.indexOf(x)===i).sort((a,b)=>b.localeCompare(a,undefined,{numeric:true,sensitivity:'base'}));
+    if(!models.length)throw new Error('モデルが見つからない');
+    const name=models[0];
+    session=await ort.InferenceSession.create('./Models/'+encodeURIComponent(name));
+    inputName=session.inputNames[0];outputNames=session.outputNames;
+    const meta=session.inputMetadata?.[inputName],dims=meta?.dimensions||[];
+    const fixed=dims.filter(d=>Number.isInteger(d)&&d>0);
+    if(fixed.length&&fixed.at(-1)!==RT.FEATURE_DIM)throw new Error('モデル入力次元と特徴量次元が一致しない');
+    recordBtn.disabled=false;actionLabel.textContent='記録開始';graphStatus.textContent='記録開始を押すと計測が始まる';
+  }catch(e){
+    console.error(e);graphStatus.textContent='モデルを読み込めない';
+    showNotice('モデル読み込み失敗: '+e.message);
+  }
+}
+
+/* ===== Session-only history ===== */
+let history=[];
+function saveHistory(item){history.unshift({...item,id:Date.now()+Math.random()});renderHistory()}
+function renderHistory(){
+  if(!history.length){historyList.innerHTML='<div class="history-empty">記録はまだない</div>';return}
+  historyList.innerHTML=history.map((r,i)=>`
+    <article class="history-item">
+      <div class="history-main">
+        <div class="history-count">${r.count} <span style="font-size:12px;color:var(--muted);font-weight:600">回</span></div>
+        <div class="history-meta">計測期間：${formatDuration(r.duration)}<br>計測日時：${formatDate(r.date)}</div>
+      </div>
+      <button class="delete-btn" data-index="${i}">削除</button>
+    </article>`).join('');
+}
+function formatDuration(s){return s<60?s.toFixed(1)+'秒':Math.floor(s/60)+'分'+Math.round(s%60)+'秒'}
+function formatDate(t){return new Intl.DateTimeFormat('ja-JP',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'}).format(new Date(t))}
+historyList.addEventListener('click',e=>{const b=e.target.closest('.delete-btn');if(b){history.splice(+b.dataset.index,1);renderHistory()}});
+
+recordBtn.addEventListener('click',()=>RT.running?stopRealtime(true):startRealtime());
+document.getElementById('historyBtn').addEventListener('click',()=>{renderHistory();historyModal.classList.add('open')});
+document.getElementById('closeHistory').addEventListener('click',()=>historyModal.classList.remove('open'));
+historyModal.addEventListener('click',e=>{if(e.target===historyModal)historyModal.classList.remove('open')});
+window.addEventListener('beforeunload',()=>{if(RT.running)stopRealtime(false)});
+
+resizeCanvas();loadModel();
+})();
+</script>
+</body>
+</html>
